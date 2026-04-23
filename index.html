@@ -6,26 +6,32 @@
   <title>Gesture Chord Wheel</title>
   <style>
     * { box-sizing: border-box; }
+
     body {
       margin: 0;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       background: #0f1115;
-      color: #f2f4f8;
+      color: #f7f4f8;
     }
+
     .app {
       max-width: 1100px;
       margin: 0 auto;
       padding: 20px;
     }
+
     h1 {
       margin: 0 0 8px;
       font-size: 28px;
+      letter-spacing: 0.02em;
     }
+
     .sub {
       margin: 0 0 18px;
-      color: #b7becd;
-      line-height: 1.6;
+      color: #d9c7d4;
+      line-height: 1.7;
     }
+
     .controls {
       display: flex;
       flex-wrap: wrap;
@@ -33,47 +39,56 @@
       align-items: center;
       margin-bottom: 14px;
     }
+
     .controls label {
       display: flex;
       align-items: center;
       gap: 8px;
-      background: #171b22;
+      background: rgba(255, 192, 203, 0.10);
       padding: 10px 12px;
       border-radius: 12px;
-      border: 1px solid #2a3342;
+      border: 1px solid rgba(255,255,255,0.12);
+      backdrop-filter: blur(6px);
     }
+
     select, button {
       font-size: 15px;
       border-radius: 10px;
-      border: 1px solid #364154;
-      background: #0f141d;
+      border: 1px solid rgba(255,255,255,0.16);
+      background: rgba(18, 16, 22, 0.85);
       color: white;
       padding: 10px 12px;
     }
+
     button {
       cursor: pointer;
-      background: #6d5efc;
-      border-color: #6d5efc;
+      background: rgba(255, 105, 180, 0.85);
+      border-color: rgba(255, 105, 180, 0.95);
       font-weight: 700;
     }
+
     button:disabled {
       opacity: 0.6;
       cursor: default;
     }
+
     .status {
       margin: 0 0 14px;
-      color: #98a2b3;
+      color: #e2c9d7;
       min-height: 24px;
+      line-height: 1.5;
     }
+
     .stage {
       position: relative;
       width: 100%;
       aspect-ratio: 16 / 9;
-      border-radius: 20px;
+      border-radius: 22px;
       overflow: hidden;
       background: #080b10;
-      border: 1px solid #2a3342;
+      border: 1px solid rgba(255,255,255,0.10);
     }
+
     video, canvas {
       position: absolute;
       inset: 0;
@@ -81,37 +96,68 @@
       height: 100%;
       object-fit: cover;
     }
-    canvas {
-      pointer-events: none;
+
+    video {
+      transform: scaleX(-1);
     }
+
+    canvas {
+      pointer-events: auto;
+      cursor: pointer;
+      touch-action: none;
+    }
+
     .readout {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
       gap: 12px;
       margin-top: 16px;
     }
+
     .card {
-      background: #171b22;
-      border: 1px solid #2a3342;
+      background: rgba(255, 192, 203, 0.10);
+      border: 1px solid rgba(255,255,255,0.12);
       border-radius: 16px;
       padding: 14px;
+      backdrop-filter: blur(6px);
     }
+
     .card .label {
-      color: #94a3b8;
+      color: #dcb7ca;
       font-size: 13px;
       margin-bottom: 8px;
     }
+
     .card .value {
       font-size: 20px;
       font-weight: 700;
-      line-height: 1.4;
+      line-height: 1.5;
       word-break: break-word;
     }
+
     .tiny {
-      color: #94a3b8;
+      color: #dcb7ca;
       font-size: 13px;
       margin-top: 10px;
       line-height: 1.6;
+    }
+
+    @media (max-width: 720px) {
+      .app {
+        padding: 14px;
+      }
+
+      h1 {
+        font-size: 24px;
+      }
+
+      .sub {
+        font-size: 14px;
+      }
+
+      .card .value {
+        font-size: 18px;
+      }
     }
   </style>
 </head>
@@ -119,8 +165,8 @@
   <div class="app">
     <h1>手勢和弦圓盤 prototype</h1>
     <p class="sub">
-      左手方向選根音，右手方向選和弦。<br>
-      左手捏合播放單音，右手捏合播放和弦。
+      左手把食指移到左圓盤選根音，右手把食指移到右圓盤選和弦。<br>
+      也可以直接點圓盤。左手捏合播放單音，右手捏合播放和弦。
     </p>
 
     <div class="controls">
@@ -163,7 +209,7 @@
       <div class="card">
         <div class="label">目前調內音</div>
         <div class="value" id="scaleValue">—</div>
-        <div class="tiny">這一版先做 8 種常用和弦，確認順了之後再加 9 / 11 / 13 / m7b5 那些。</div>
+        <div class="tiny">這一版先放常用和弦，等你覺得操作順了，再擴成進階和弦頁。</div>
       </div>
     </div>
   </div>
@@ -217,8 +263,6 @@
       synth: null,
       selectedRoot: 0,
       selectedChord: 0,
-      leftAngle: null,
-      rightAngle: null,
       leftPinched: false,
       rightPinched: false,
       lastTriggerAt: 0
@@ -230,6 +274,7 @@
       option.textContent = label;
       keySelect.appendChild(option);
     });
+
     keySelect.value = "0";
 
     function setStatus(text) {
@@ -248,20 +293,52 @@
       return (rad % twoPi + twoPi) % twoPi;
     }
 
-    function angleToIndex(angle, total) {
-      const shifted = normAngle(angle + Math.PI / 2);
-      const seg = (Math.PI * 2) / total;
-      return Math.floor(shifted / seg) % total;
-    }
-
     function dist(a, b) {
       return Math.hypot(a.x - b.x, a.y - b.y);
     }
 
-    function getFingerAngle(landmarks) {
-      const base = landmarks[5];  // index finger MCP
-      const tip = landmarks[8];   // index finger tip
-      return Math.atan2(tip.y - base.y, tip.x - base.x);
+    function mirrorLandmarks(landmarks) {
+      return landmarks.map(lm => ({
+        ...lm,
+        x: 1 - lm.x
+      }));
+    }
+
+    function toCanvasPoint(lm) {
+      return {
+        x: lm.x * canvas.width,
+        y: lm.y * canvas.height
+      };
+    }
+
+    function getDiskLayout() {
+      const radius = Math.min(canvas.width, canvas.height) * 0.24;
+
+      return {
+        left: {
+          x: canvas.width * 0.26,
+          y: canvas.height * 0.72,
+          r: radius
+        },
+        right: {
+          x: canvas.width * 0.74,
+          y: canvas.height * 0.72,
+          r: radius
+        }
+      };
+    }
+
+    function pointToDiskIndex(point, disk, total) {
+      const dx = point.x - disk.x;
+      const dy = point.y - disk.y;
+      const distance = Math.hypot(dx, dy);
+
+      if (distance > disk.r) return null;
+      if (distance < disk.r * 0.18) return null;
+
+      const angle = normAngle(Math.atan2(dy, dx) + Math.PI / 2);
+      const seg = (Math.PI * 2) / total;
+      return Math.floor(angle / seg) % total;
     }
 
     function isPinching(landmarks) {
@@ -294,7 +371,9 @@
       const rootLabel = FULL_LABELS[state.selectedRoot];
       const chordType = CHORDS[state.selectedChord].name;
       const chordNotes = buildChordNotes(state.selectedRoot, state.selectedChord);
-      const scaleNotes = [...getScaleSet()].sort((a, b) => a - b).map(i => SHORT_LABELS[i]);
+      const scaleNotes = [...getScaleSet()]
+        .sort((a, b) => a - b)
+        .map(i => SHORT_LABELS[i]);
 
       rootValue.textContent = rootLabel;
       chordValue.textContent = `${SHORT_LABELS[state.selectedRoot]}${chordType}`;
@@ -320,26 +399,23 @@
       state.lastTriggerAt = performance.now();
     }
 
-    function toCanvasPoint(lm) {
-      return {
-        x: lm.x * canvas.width,
-        y: lm.y * canvas.height
-      };
-    }
-
-    function drawDisk(cx, cy, radius, items, selectedIndex, pointerAngle, options = {}) {
+    function drawDisk(cx, cy, radius, items, selectedIndex, options = {}) {
       const total = items.length;
       const seg = (Math.PI * 2) / total;
-      const innerRadius = radius * 0.54;
+      const innerRadius = radius * 0.34;
       const diatonicSet = options.diatonicSet || null;
 
       for (let i = 0; i < total; i++) {
         const start = -Math.PI / 2 + i * seg;
         const end = start + seg;
 
-        let fill = "#1d2430";
-        if (selectedIndex === i) fill = "#6d5efc";
-        else if (diatonicSet && diatonicSet.has(i)) fill = "#1d5f57";
+        let fill = "rgba(255, 182, 193, 0.18)";
+
+        if (selectedIndex === i) {
+          fill = "rgba(255, 105, 180, 0.62)";
+        } else if (diatonicSet && diatonicSet.has(i)) {
+          fill = "rgba(255, 182, 193, 0.32)";
+        }
 
         ctx.beginPath();
         ctx.moveTo(cx, cy);
@@ -348,7 +424,7 @@
         ctx.fillStyle = fill;
         ctx.fill();
 
-        ctx.strokeStyle = "#0c1016";
+        ctx.strokeStyle = "rgba(255,255,255,0.18)";
         ctx.lineWidth = 2;
         ctx.stroke();
 
@@ -356,8 +432,8 @@
         const tx = cx + Math.cos(mid) * radius * 0.73;
         const ty = cy + Math.sin(mid) * radius * 0.73;
 
-        ctx.fillStyle = "#f8fafc";
-        ctx.font = "bold 16px system-ui";
+        ctx.fillStyle = "#fff7fb";
+        ctx.font = "bold 18px system-ui";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText(items[i], tx, ty);
@@ -365,106 +441,75 @@
 
       ctx.beginPath();
       ctx.arc(cx, cy, innerRadius, 0, Math.PI * 2);
-      ctx.fillStyle = "#0e131a";
+      ctx.fillStyle = "rgba(255, 240, 245, 0.16)";
       ctx.fill();
-      ctx.strokeStyle = "#364154";
+      ctx.strokeStyle = "rgba(255,255,255,0.22)";
       ctx.lineWidth = 2;
       ctx.stroke();
-
-      if (pointerAngle !== null) {
-        const a = pointerAngle - Math.PI / 2;
-        const px = cx + Math.cos(a) * radius * 0.92;
-        const py = cy + Math.sin(a) * radius * 0.92;
-
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(px, py);
-        ctx.strokeStyle = "#f8fafc";
-        ctx.lineWidth = 5;
-        ctx.stroke();
-
-        ctx.beginPath();
-        ctx.arc(px, py, 8, 0, Math.PI * 2);
-        ctx.fillStyle = "#f8fafc";
-        ctx.fill();
-      }
     }
 
-    function drawHandDirection(landmarks, color, label) {
-      const base = toCanvasPoint(landmarks[5]);
+    function drawHandDot(landmarks, color, label) {
       const tip = toCanvasPoint(landmarks[8]);
 
       ctx.beginPath();
-      ctx.moveTo(base.x, base.y);
-      ctx.lineTo(tip.x, tip.y);
-      ctx.strokeStyle = color;
-      ctx.lineWidth = 6;
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.arc(tip.x, tip.y, 10, 0, Math.PI * 2);
+      ctx.arc(tip.x, tip.y, 11, 0, Math.PI * 2);
       ctx.fillStyle = color;
       ctx.fill();
 
-      ctx.font = "bold 18px system-ui";
+      ctx.beginPath();
+      ctx.arc(tip.x, tip.y, 16, 0, Math.PI * 2);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      ctx.font = "bold 17px system-ui";
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
       ctx.fillStyle = color;
-      ctx.fillText(label, tip.x + 14, tip.y);
+      ctx.fillText(label, tip.x + 16, tip.y);
     }
 
     function drawScene(leftHand, rightHand) {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      const leftDisk = {
-        x: canvas.width * 0.25,
-        y: canvas.height * 0.72,
-        r: Math.min(canvas.width, canvas.height) * 0.18
-      };
-
-      const rightDisk = {
-        x: canvas.width * 0.75,
-        y: canvas.height * 0.72,
-        r: Math.min(canvas.width, canvas.height) * 0.18
-      };
+      const disks = getDiskLayout();
 
       drawDisk(
-        leftDisk.x,
-        leftDisk.y,
-        leftDisk.r,
+        disks.left.x,
+        disks.left.y,
+        disks.left.r,
         SHORT_LABELS,
         state.selectedRoot,
-        state.leftAngle,
         { diatonicSet: getScaleSet() }
       );
 
       drawDisk(
-        rightDisk.x,
-        rightDisk.y,
-        rightDisk.r,
+        disks.right.x,
+        disks.right.y,
+        disks.right.r,
         CHORDS.map(c => c.name),
-        state.selectedChord,
-        state.rightAngle
+        state.selectedChord
       );
 
-      ctx.fillStyle = "#e2e8f0";
-      ctx.font = "bold 20px system-ui";
+      ctx.fillStyle = "#fff7fb";
+      ctx.font = "bold 22px system-ui";
       ctx.textAlign = "center";
-      ctx.fillText("左手：根音", leftDisk.x, leftDisk.y);
-      ctx.fillText("右手：和弦", rightDisk.x, rightDisk.y);
+      ctx.textBaseline = "middle";
+      ctx.fillText("根音", disks.left.x, disks.left.y);
+      ctx.fillText("和弦", disks.right.x, disks.right.y);
 
       if (leftHand) {
-        drawHandDirection(
+        drawHandDot(
           leftHand,
-          state.leftPinched ? "#22c55e" : "#60a5fa",
+          state.leftPinched ? "#ff69b4" : "#ffd1e8",
           state.leftPinched ? "Left pinch" : "Left"
         );
       }
 
       if (rightHand) {
-        drawHandDirection(
+        drawHandDot(
           rightHand,
-          state.rightPinched ? "#22c55e" : "#f59e0b",
+          state.rightPinched ? "#ff69b4" : "#ffd1e8",
           state.rightPinched ? "Right pinch" : "Right"
         );
       }
@@ -483,22 +528,29 @@
         if (side === "Right") rightHand = handLandmarks[i];
       }
 
-      if (leftHand) {
-        state.leftAngle = normAngle(getFingerAngle(leftHand));
-        state.selectedRoot = angleToIndex(state.leftAngle, SHORT_LABELS.length);
-      } else {
-        state.leftAngle = null;
+      const mirroredLeftHand = leftHand ? mirrorLandmarks(leftHand) : null;
+      const mirroredRightHand = rightHand ? mirrorLandmarks(rightHand) : null;
+
+      const disks = getDiskLayout();
+
+      if (mirroredLeftHand) {
+        const leftTip = toCanvasPoint(mirroredLeftHand[8]);
+        const rootIdx = pointToDiskIndex(leftTip, disks.left, SHORT_LABELS.length);
+        if (rootIdx !== null) {
+          state.selectedRoot = rootIdx;
+        }
       }
 
-      if (rightHand) {
-        state.rightAngle = normAngle(getFingerAngle(rightHand));
-        state.selectedChord = angleToIndex(state.rightAngle, CHORDS.length);
-      } else {
-        state.rightAngle = null;
+      if (mirroredRightHand) {
+        const rightTip = toCanvasPoint(mirroredRightHand[8]);
+        const chordIdx = pointToDiskIndex(rightTip, disks.right, CHORDS.length);
+        if (chordIdx !== null) {
+          state.selectedChord = chordIdx;
+        }
       }
 
-      const newLeftPinch = leftHand ? isPinching(leftHand) : false;
-      const newRightPinch = rightHand ? isPinching(rightHand) : false;
+      const newLeftPinch = mirroredLeftHand ? isPinching(mirroredLeftHand) : false;
+      const newRightPinch = mirroredRightHand ? isPinching(mirroredRightHand) : false;
 
       if (newLeftPinch && !state.leftPinched) playRoot();
       if (newRightPinch && !state.rightPinched) playChord();
@@ -507,7 +559,37 @@
       state.rightPinched = newRightPinch;
 
       updateReadout();
-      drawScene(leftHand, rightHand);
+      drawScene(mirroredLeftHand, mirroredRightHand);
+    }
+
+    function handleCanvasPointer(e) {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+
+      const point = {
+        x: (e.clientX - rect.left) * scaleX,
+        y: (e.clientY - rect.top) * scaleY
+      };
+
+      const disks = getDiskLayout();
+
+      const leftIdx = pointToDiskIndex(point, disks.left, SHORT_LABELS.length);
+      if (leftIdx !== null) {
+        state.selectedRoot = leftIdx;
+        updateReadout();
+        drawScene(null, null);
+        playRoot();
+        return;
+      }
+
+      const rightIdx = pointToDiskIndex(point, disks.right, CHORDS.length);
+      if (rightIdx !== null) {
+        state.selectedChord = rightIdx;
+        updateReadout();
+        drawScene(null, null);
+        playChord();
+      }
     }
 
     async function initHandTracking() {
@@ -530,6 +612,7 @@
 
     async function startApp() {
       if (state.started) return;
+
       startBtn.disabled = true;
       setStatus("正在啟動聲音…");
 
@@ -549,6 +632,7 @@
         state.synth.volume.value = -10;
 
         setStatus("正在取得相機…");
+
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: "user",
@@ -568,15 +652,19 @@
           };
         });
 
-        window.addEventListener("resize", resizeCanvas);
+        window.addEventListener("resize", () => {
+          resizeCanvas();
+          drawScene(null, null);
+        });
 
         setStatus("正在載入手勢模型…");
         await initHandTracking();
 
         state.started = true;
-        setStatus("已啟動：左手選根音，右手選和弦，捏合播放");
+        setStatus("已啟動：左手選根音，右手選和弦，捏合播放；也可以直接點圓盤");
 
         updateReadout();
+        drawScene(null, null);
         renderLoop();
       } catch (err) {
         console.error(err);
@@ -597,10 +685,21 @@
     }
 
     startBtn.addEventListener("click", startApp);
-    keySelect.addEventListener("change", updateReadout);
-    modeSelect.addEventListener("change", updateReadout);
+
+    keySelect.addEventListener("change", () => {
+      updateReadout();
+      drawScene(null, null);
+    });
+
+    modeSelect.addEventListener("change", () => {
+      updateReadout();
+      drawScene(null, null);
+    });
+
+    canvas.addEventListener("pointerdown", handleCanvasPointer);
 
     updateReadout();
+    drawScene(null, null);
   </script>
 </body>
 </html>
