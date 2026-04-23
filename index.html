@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gesture Chord Wheel</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0f1115;
+      color: #f2f4f8;
+    }
+    .app {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+    }
+    .sub {
+      margin: 0 0 18px;
+      color: #b7becd;
+      line-height: 1.6;
+    }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+    .controls label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: #171b22;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid #2a3342;
+    }
+    select, button {
+      font-size: 15px;
+      border-radius: 10px;
+      border: 1px solid #364154;
+      background: #0f141d;
+      color: white;
+      padding: 10px 12px;
+    }
+    button {
+      cursor: pointer;
+      background: #6d5efc;
+      border-color: #6d5efc;
+      font-weight: 700;
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+    .status {
+      margin: 0 0 14px;
+      color: #98a2b3;
+      min-height: 24px;
+    }
+    .stage {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      border-radius: 20px;
+      overflow: hidden;
+      background: #080b10;
+      border: 1px solid #2a3342;
+    }
+    video, canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    canvas {
+      pointer-events: none;
+    }
+    .readout {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+    }
+    .card {
+      background: #171b22;
+      border: 1px solid #2a3342;
+      border-radius: 16px;
+      padding: 14px;
+    }
+    .card .label {
+      color: #94a3b8;
+      font-size: 13px;
+      margin-bottom: 8px;
+    }
+    .card .value {
+      font-size: 20px;
+      font-weight: 700;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+    .tiny {
+      color: #94a3b8;
+      font-size: 13px;
+      margin-top: 10px;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <h1>手勢和弦圓盤 prototype</h1>
+    <p class="sub">
+      左手方向選根音，右手方向選和弦。<br>
+      左手捏合播放單音，右手捏合播放和弦。
+    </p>
+
+    <div class="controls">
+      <button id="startBtn">啟動相機與聲音</button>
+
+      <label>
+        調性
+        <select id="keySelect"></select>
+      </label>
+
+      <label>
+        模式
+        <select id="modeSelect">
+          <option value="major">major</option>
+          <option value="minor">minor</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="status" id="status">尚未啟動</div>
+
+    <div class="stage">
+      <video id="video" autoplay playsinline muted></video>
+      <canvas id="overlay"></canvas>
+    </div>
+
+    <div class="readout">
+      <div class="card">
+        <div class="label">目前根音</div>
+        <div class="value" id="rootValue">—</div>
+      </div>
+      <div class="card">
+        <div class="label">目前和弦</div>
+        <div class="value" id="chordValue">—</div>
+      </div>
+      <div class="card">
+        <div class="label">實際音名</div>
+        <div class="value" id="notesValue">—</div>
+      </div>
+      <div class="card">
+        <div class="label">目前調內音</div>
+        <div class="value" id="scaleValue">—</div>
+        <div class="tiny">這一版先做 8 種常用和弦，確認順了之後再加 9 / 11 / 13 / m7b5 那些。</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/tone@14.7.77/build/Tone.js"></script>
+  <script type="module">
+    import {
+      FilesetResolver,
+      HandLandmarker
+    } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.mjs";
+
+    const Tone = window.Tone;
+
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("overlay");
+    const ctx = canvas.getContext("2d");
+
+    const startBtn = document.getElementById("startBtn");
+    const keySelect = document.getElementById("keySelect");
+    const modeSelect = document.getElementById("modeSelect");
+    const statusEl = document.getElementById("status");
+
+    const rootValue = document.getElementById("rootValue");
+    const chordValue = document.getElementById("chordValue");
+    const notesValue = document.getElementById("notesValue");
+    const scaleValue = document.getElementById("scaleValue");
+
+    const SHORT_LABELS = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
+    const FULL_LABELS = ["C", "C#/Db", "D", "Eb/D#", "E", "F", "F#/Gb", "G", "Ab/G#", "A", "Bb/A#", "B"];
+    const AUDIO_NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+
+    const SCALE_PATTERNS = {
+      major: [0, 2, 4, 5, 7, 9, 11],
+      minor: [0, 2, 3, 5, 7, 8, 10]
+    };
+
+    const CHORDS = [
+      { name: "maj",  intervals: [0, 4, 7] },
+      { name: "m",    intervals: [0, 3, 7] },
+      { name: "7",    intervals: [0, 4, 7, 10] },
+      { name: "maj7", intervals: [0, 4, 7, 11] },
+      { name: "m7",   intervals: [0, 3, 7, 10] },
+      { name: "sus2", intervals: [0, 2, 7] },
+      { name: "sus4", intervals: [0, 5, 7] },
+      { name: "add9", intervals: [0, 4, 7, 14] }
+    ];
+
+    const state = {
+      started: false,
+      handLandmarker: null,
+      synth: null,
+      selectedRoot: 0,
+      selectedChord: 0,
+      leftAngle: null,
+      rightAngle: null,
+      leftPinched: false,
+      rightPinched: false,
+      lastTriggerAt: 0
+    };
+
+    SHORT_LABELS.forEach((label, i) => {
+      const option = document.createElement("option");
+      option.value = String(i);
+      option.textContent = label;
+      keySelect.appendChild(option);
+    });
+    keySelect.value = "0";
+
+    function setStatus(text) {
+      statusEl.textContent = text;
+    }
+
+    function resizeCanvas() {
+      const w = video.videoWidth || 1280;
+      const h = video.videoHeight || 720;
+      canvas.width = w;
+      canvas.height = h;
+    }
+
+    function normAngle(rad) {
+      const twoPi = Math.PI * 2;
+      return (rad % twoPi + twoPi) % twoPi;
+    }
+
+    function angleToIndex(angle, total) {
+      const shifted = normAngle(angle + Math.PI / 2);
+      const seg = (Math.PI * 2) / total;
+      return Math.floor(shifted / seg) % total;
+    }
+
+    function dist(a, b) {
+      return Math.hypot(a.x - b.x, a.y - b.y);
+    }
+
+    function getFingerAngle(landmarks) {
+      const base = landmarks[5];  // index finger MCP
+      const tip = landmarks[8];   // index finger tip
+      return Math.atan2(tip.y - base.y, tip.x - base.x);
+    }
+
+    function isPinching(landmarks) {
+      const thumbTip = landmarks[4];
+      const indexTip = landmarks[8];
+      const wrist = landmarks[0];
+      const middleMcp = landmarks[9];
+      const palmSize = dist(wrist, middleMcp);
+      return dist(thumbTip, indexTip) < palmSize * 0.45;
+    }
+
+    function midiToNoteName(midi) {
+      const note = AUDIO_NOTE_NAMES[midi % 12];
+      const octave = Math.floor(midi / 12) - 1;
+      return `${note}${octave}`;
+    }
+
+    function buildChordNotes(rootIndex, chordIndex, octave = 4) {
+      const rootMidi = 12 * (octave + 1) + rootIndex;
+      return CHORDS[chordIndex].intervals.map(interval => midiToNoteName(rootMidi + interval));
+    }
+
+    function getScaleSet() {
+      const tonic = Number(keySelect.value);
+      const mode = modeSelect.value;
+      return new Set(SCALE_PATTERNS[mode].map(step => (tonic + step) % 12));
+    }
+
+    function updateReadout() {
+      const rootLabel = FULL_LABELS[state.selectedRoot];
+      const chordType = CHORDS[state.selectedChord].name;
+      const chordNotes = buildChordNotes(state.selectedRoot, state.selectedChord);
+      const scaleNotes = [...getScaleSet()].sort((a, b) => a - b).map(i => SHORT_LABELS[i]);
+
+      rootValue.textContent = rootLabel;
+      chordValue.textContent = `${SHORT_LABELS[state.selectedRoot]}${chordType}`;
+      notesValue.textContent = chordNotes.join("  ");
+      scaleValue.textContent = scaleNotes.join("  ");
+    }
+
+    function canTrigger() {
+      return performance.now() - state.lastTriggerAt > 220;
+    }
+
+    function playRoot() {
+      if (!state.synth || !canTrigger()) return;
+      const note = buildChordNotes(state.selectedRoot, 0, 4)[0];
+      state.synth.triggerAttackRelease(note, "8n");
+      state.lastTriggerAt = performance.now();
+    }
+
+    function playChord() {
+      if (!state.synth || !canTrigger()) return;
+      const notes = buildChordNotes(state.selectedRoot, state.selectedChord, 4);
+      state.synth.triggerAttackRelease(notes, "2n");
+      state.lastTriggerAt = performance.now();
+    }
+
+    function toCanvasPoint(lm) {
+      return {
+        x: lm.x * canvas.width,
+        y: lm.y * canvas.height
+      };
+    }
+
+    function drawDisk(cx, cy, radius, items, selectedIndex, pointerAngle, options = {}) {
+      const total = items.length;
+      const seg = (Math.PI * 2) / total;
+      const innerRadius = radius * 0.54;
+      const diatonicSet = options.diatonicSet || null;
+
+      for (let i = 0; i < total; i++) {
+        const start = -Math.PI / 2 + i * seg;
+        const end = start + seg;
+
+        let fill = "#1d2430";
+        if (selectedIndex === i) fill = "#6d5efc";
+        else if (diatonicSet && diatonicSet.has(i)) fill = "#1d5f57";
+
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.arc(cx, cy, radius, start, end);
+        ctx.closePath();
+        ctx.fillStyle = fill;
+        ctx.fill();
+
+        ctx.strokeStyle = "#0c1016";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        const mid = start + seg / 2;
+        const tx = cx + Math.cos(mid) * radius * 0.73;
+        const ty = cy + Math.sin(mid) * radius * 0.73;
+
+        ctx.fillStyle = "#f8fafc";
+        ctx.font = "bold 16px system-ui";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(items[i], tx, ty);
+      }
+
+      ctx.beginPath();
+      ctx.arc(cx, cy, innerRadius, 0, Math.PI * 2);
+      ctx.fillStyle = "#0e131a";
+      ctx.fill();
+      ctx.strokeStyle = "#364154";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      if (pointerAngle !== null) {
+        const a = pointerAngle - Math.PI / 2;
+        const px = cx + Math.cos(a) * radius * 0.92;
+        const py = cy + Math.sin(a) * radius * 0.92;
+
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(px, py);
+        ctx.strokeStyle = "#f8fafc";
+        ctx.lineWidth = 5;
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(px, py, 8, 0, Math.PI * 2);
+        ctx.fillStyle = "#f8fafc";
+        ctx.fill();
+      }
+    }
+
+    function drawHandDirection(landmarks, color, label) {
+      const base = toCanvasPoint(landmarks[5]);
+      const tip = toCanvasPoint(landmarks[8]);
+
+      ctx.beginPath();
+      ctx.moveTo(base.x, base.y);
+      ctx.lineTo(tip.x, tip.y);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 6;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(tip.x, tip.y, 10, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+
+      ctx.font = "bold 18px system-ui";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = color;
+      ctx.fillText(label, tip.x + 14, tip.y);
+    }
+
+    function drawScene(leftHand, rightHand) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      const leftDisk = {
+        x: canvas.width * 0.25,
+        y: canvas.height * 0.72,
+        r: Math.min(canvas.width, canvas.height) * 0.18
+      };
+
+      const rightDisk = {
+        x: canvas.width * 0.75,
+        y: canvas.height * 0.72,
+        r: Math.min(canvas.width, canvas.height) * 0.18
+      };
+
+      drawDisk(
+        leftDisk.x,
+        leftDisk.y,
+        leftDisk.r,
+        SHORT_LABELS,
+        state.selectedRoot,
+        state.leftAngle,
+        { diatonicSet: getScaleSet() }
+      );
+
+      drawDisk(
+        rightDisk.x,
+        rightDisk.y,
+        rightDisk.r,
+        CHORDS.map(c => c.name),
+        state.selectedChord,
+        state.rightAngle
+      );
+
+      ctx.fillStyle = "#e2e8f0";
+      ctx.font = "bold 20px system-ui";
+      ctx.textAlign = "center";
+      ctx.fillText("左手：根音", leftDisk.x, leftDisk.y);
+      ctx.fillText("右手：和弦", rightDisk.x, rightDisk.y);
+
+      if (leftHand) {
+        drawHandDirection(
+          leftHand,
+          state.leftPinched ? "#22c55e" : "#60a5fa",
+          state.leftPinched ? "Left pinch" : "Left"
+        );
+      }
+
+      if (rightHand) {
+        drawHandDirection(
+          rightHand,
+          state.rightPinched ? "#22c55e" : "#f59e0b",
+          state.rightPinched ? "Right pinch" : "Right"
+        );
+      }
+    }
+
+    function processHands(results) {
+      let leftHand = null;
+      let rightHand = null;
+
+      const handLandmarks = results.landmarks || [];
+      const handedness = results.handedness || [];
+
+      for (let i = 0; i < handLandmarks.length; i++) {
+        const side = handedness[i]?.[0]?.categoryName;
+        if (side === "Left") leftHand = handLandmarks[i];
+        if (side === "Right") rightHand = handLandmarks[i];
+      }
+
+      if (leftHand) {
+        state.leftAngle = normAngle(getFingerAngle(leftHand));
+        state.selectedRoot = angleToIndex(state.leftAngle, SHORT_LABELS.length);
+      } else {
+        state.leftAngle = null;
+      }
+
+      if (rightHand) {
+        state.rightAngle = normAngle(getFingerAngle(rightHand));
+        state.selectedChord = angleToIndex(state.rightAngle, CHORDS.length);
+      } else {
+        state.rightAngle = null;
+      }
+
+      const newLeftPinch = leftHand ? isPinching(leftHand) : false;
+      const newRightPinch = rightHand ? isPinching(rightHand) : false;
+
+      if (newLeftPinch && !state.leftPinched) playRoot();
+      if (newRightPinch && !state.rightPinched) playChord();
+
+      state.leftPinched = newLeftPinch;
+      state.rightPinched = newRightPinch;
+
+      updateReadout();
+      drawScene(leftHand, rightHand);
+    }
+
+    async function initHandTracking() {
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+      );
+
+      state.handLandmarker = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task"
+        },
+        runningMode: "VIDEO",
+        numHands: 2,
+        minHandDetectionConfidence: 0.6,
+        minHandPresenceConfidence: 0.6,
+        minTrackingConfidence: 0.6
+      });
+    }
+
+    async function startApp() {
+      if (state.started) return;
+      startBtn.disabled = true;
+      setStatus("正在啟動聲音…");
+
+      try {
+        await Tone.start();
+
+        state.synth = new Tone.PolySynth(Tone.Synth, {
+          oscillator: { type: "triangle" },
+          envelope: {
+            attack: 0.01,
+            decay: 0.12,
+            sustain: 0.35,
+            release: 0.8
+          }
+        }).toDestination();
+
+        state.synth.volume.value = -10;
+
+        setStatus("正在取得相機…");
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: "user",
+            width: { ideal: 1280 },
+            height: { ideal: 720 }
+          },
+          audio: false
+        });
+
+        video.srcObject = stream;
+
+        await new Promise(resolve => {
+          video.onloadedmetadata = () => {
+            video.play();
+            resizeCanvas();
+            resolve();
+          };
+        });
+
+        window.addEventListener("resize", resizeCanvas);
+
+        setStatus("正在載入手勢模型…");
+        await initHandTracking();
+
+        state.started = true;
+        setStatus("已啟動：左手選根音，右手選和弦，捏合播放");
+
+        updateReadout();
+        renderLoop();
+      } catch (err) {
+        console.error(err);
+        setStatus("啟動失敗，請檢查相機權限或瀏覽器主控台錯誤訊息。");
+        startBtn.disabled = false;
+      }
+    }
+
+    function renderLoop() {
+      if (!state.started || !state.handLandmarker) return;
+
+      if (video.readyState >= 2) {
+        const results = state.handLandmarker.detectForVideo(video, performance.now());
+        processHands(results);
+      }
+
+      requestAnimationFrame(renderLoop);
+    }
+
+    startBtn.addEventListener("click", startApp);
+    keySelect.addEventListener("change", updateReadout);
+    modeSelect.addEventListener("change", updateReadout);
+
+    updateReadout();
+  </script>
+</body>
+</html>
